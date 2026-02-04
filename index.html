@@ -59,16 +59,16 @@
     const userModule = `
       export function run(root) {
         const h = document.createElement('h1');
-        h.textContent = 'Hello from QuickJS inside WebAssembly!';
+        h.textContent = 'QuickJS Sandbox Demo';
 
         const p1 = document.createElement('p');
-        p1.textContent = 'This content is rendered by JavaScript running in a sandboxed VM.';
+        p1.textContent = 'This page is powered by JavaScript running inside a QuickJS WebAssembly sandbox.';
 
         const p2 = document.createElement('p');
-        p2.textContent = 'The sandbox restricts which elements can be created and where they can be appended.';
+        p2.textContent = 'Only a limited set of DOM operations are allowed — element creation, text updates, and click events.';
 
         const p3 = document.createElement('p');
-        p3.textContent = 'Try the counter below — click events are passed back into the VM!';
+        p3.textContent = 'Use the counter below to see events round-trip through the VM!';
 
         const p4 = document.createElement('p');
         const decBtn = document.createElement('button');
