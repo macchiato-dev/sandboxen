@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuickJS Syntax Highlighter</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 1rem; }
+    quickjs-highlight { display: block; background: #1e1e1e; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    quickjs-highlight pre { margin: 0; }
+    quickjs-highlight code { font-family: 'SF Mono', Consolas, monospace; font-size: 14px; line-height: 1.5; color: #d4d4d4; }
+    .status { color: #666; font-style: italic; margin-bottom: 1rem; }
+    .kw { color: #569cd6; }
+    .str { color: #ce9178; }
+    .num { color: #b5cea8; }
+    .cmt { color: #6a9955; font-style: italic; }
+    .fn { color: #dcdcaa; }
+    .op { color: #d4d4d4; }
+    .punc { color: #d4d4d4; }
+  </style>
+</head>
+<body>
+  <h1>Syntax Highlighting Sandbox</h1>
+  <p>Code rendered by JavaScript inside a QuickJS WebAssembly sandbox with schema-enforced DOM.</p>
+  <div class="status" id="status">Loading QuickJS...</div>
+  <quickjs-highlight></quickjs-highlight>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "quickjs-emscripten-core": "https://cdn.jsdelivr.net/npm/quickjs-emscripten-core@0.31.0/+esm",
+      "@jitl/quickjs-singlefile-browser-release-sync": "https://cdn.jsdelivr.net/npm/@jitl/quickjs-singlefile-browser-release-sync@0.31.0/+esm",
+      "@jitl/quickjs-ffi-types": "https://cdn.jsdelivr.net/npm/@jitl/quickjs-ffi-types@0.31.0/+esm",
+      "quickjs-emscripten-core/emscripten-module": "https://cdn.jsdelivr.net/npm/quickjs-emscripten-core@0.31.0/dist/emscripten-module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import { newQuickJSWASMModuleFromVariant } from 'quickjs-emscripten-core';
+    import variant from '@jitl/quickjs-singlefile-browser-release-sync';
+
+    const domModule = `
+      let host;
+      const ID = Symbol.for('nodeId');
+      const wrappers = new Map();
+      const makeNode = (id) => {
+        if (wrappers.has(id)) return wrappers.get(id);
+        const n = {
+          [ID]: id,
+          set textContent(t) { host.setText(this[ID], t); },
+          set className(c) { host.setClass(this[ID], c); },
+          append(...children) { children.forEach(c => host.append(this[ID], c[ID])); }
+        };
+        wrappers.set(id, n);
+        return n;
+      };
+      export function setup(h) {
+        host = h;
+        globalThis.document = {
+          createElement: (tag) => { const id = host.createElement(tag); return id < 0 ? null : makeNode(id); },
+          createTextNode: (text) => { const id = host.createTextNode(text); return id < 0 ? null : makeNode(id); }
+        };
+      }
+      export function callRun(runFn, rootId) { runFn(makeNode(rootId)); }
+    `;
+
+    const userModule = `
+      const KEYWORDS = ['const', 'let', 'var', 'if', 'else', 'return', 'function', 'export', 'import', 'from', 'class', 'extends', 'new', 'this', 'true', 'false', 'null'];
+
+      function tokenize(code) {
+        const tokens = [];
+        let i = 0;
+        while (i < code.length) {
+          // Whitespace
+          if (/\\s/.test(code[i])) {
+            let ws = '';
+            while (i < code.length && /\\s/.test(code[i])) ws += code[i++];
+            tokens.push({ type: 'ws', value: ws });
+            continue;
+          }
+          // Comment
+          if (code[i] === '/' && code[i+1] === '/') {
+            let cmt = '';
+            while (i < code.length && code[i] !== '\\n') cmt += code[i++];
+            tokens.push({ type: 'cmt', value: cmt });
+            continue;
+          }
+          // String
+          if (code[i] === "'" || code[i] === '"') {
+            const q = code[i];
+            let str = q;
+            i++;
+            while (i < code.length && code[i] !== q) {
+              if (code[i] === '\\\\') { str += code[i++]; }
+              if (i < code.length) str += code[i++];
+            }
+            if (i < code.length) str += code[i++];
+            tokens.push({ type: 'str', value: str });
+            continue;
+          }
+          // Number
+          if (/[0-9]/.test(code[i])) {
+            let num = '';
+            while (i < code.length && /[0-9.]/.test(code[i])) num += code[i++];
+            tokens.push({ type: 'num', value: num });
+            continue;
+          }
+          // Identifier or keyword
+          if (/[a-zA-Z_$]/.test(code[i])) {
+            let id = '';
+            while (i < code.length && /[a-zA-Z0-9_$]/.test(code[i])) id += code[i++];
+            if (KEYWORDS.includes(id)) {
+              tokens.push({ type: 'kw', value: id });
+            } else {
+              // Check if followed by ( for function call
+              let j = i;
+              while (j < code.length && /\\s/.test(code[j])) j++;
+              if (code[j] === '(') {
+                tokens.push({ type: 'fn', value: id });
+              } else {
+                tokens.push({ type: 'id', value: id });
+              }
+            }
+            continue;
+          }
+          // Operators and punctuation
+          tokens.push({ type: 'punc', value: code[i++] });
+        }
+        return tokens;
+      }
+
+      export function run(root) {
+        const code = \`export function run(root) {
+  const h = document.createElement('h1');
+  h.textContent = 'QuickJS Sandbox Demo';
+
+  const p1 = document.createElement('p');
+  p1.textContent = 'This page is powered by JavaScript...';
+
+  let count = 0;
+  const handler = (e) => {
+    if (e.target === decBtn) count--;
+    else if (e.target === incBtn) count++;
+    countText.textContent = String(count);
+  };
+
+  root.append(h, p1, p2, p3, p4);
+}\`;
+
+        const pre = document.createElement('pre');
+        const codeEl = document.createElement('code');
+
+        const tokens = tokenize(code);
+        for (const tok of tokens) {
+          if (tok.type === 'ws' || tok.type === 'id' || tok.type === 'punc') {
+            const t = document.createTextNode(tok.value);
+            codeEl.append(t);
+          } else {
+            const span = document.createElement('span');
+            span.className = tok.type;
+            span.textContent = tok.value;
+            codeEl.append(span);
+          }
+        }
+
+        pre.append(codeEl);
+        root.append(pre);
+      }
+    `;
+
+    const QuickJS = await newQuickJSWASMModuleFromVariant(variant);
+
+    class QuickJSHighlight extends HTMLElement {
+      #vm; #handles = []; #nodes = new Map(); #usedIds = new Set(); #idPool = []; #appendCounts = new Map();
+      #createCount = 0; #gas = 2000; #lastRefill = 0;
+      static MAX_CREATES = 500; static MAX_TEXT = 1024; static MAX_CHILDREN = 200;
+      static SCHEMA = { root: ['pre'], pre: ['code'], code: ['span', 'text'], span: ['text'] };
+      static ALLOWED_CLASSES = ['kw', 'str', 'num', 'cmt', 'fn', 'op', 'punc'];
+      static GAS_OP = 1; static GAS_TOPUP = 2000; static GAS_REFILL_MS = 1000;
+
+      #useGas() {
+        const now = Date.now();
+        if (this.#gas < QuickJSHighlight.GAS_OP && now - this.#lastRefill >= QuickJSHighlight.GAS_REFILL_MS) {
+          this.#gas = QuickJSHighlight.GAS_TOPUP;
+          this.#lastRefill = now;
+        }
+        if (this.#gas < QuickJSHighlight.GAS_OP) return false;
+        this.#gas -= QuickJSHighlight.GAS_OP;
+        return true;
+      }
+
+      #allocId() {
+        while (!this.#idPool.length) {
+          const batch = new Uint32Array(16);
+          crypto.getRandomValues(batch);
+          for (const id of batch) if (!this.#usedIds.has(id)) this.#idPool.push(id);
+        }
+        const id = this.#idPool.pop();
+        this.#usedIds.add(id);
+        return id;
+      }
+
+      connectedCallback() {
+        this.#vm = QuickJS.newContext();
+        const vm = this.#vm;
+
+        const rootId = this.#allocId();
+        this.#nodes.set(rootId, { el: this, tag: 'root' });
+
+        const domMod = vm.unwrapResult(vm.evalCode(domModule, 'dom.js', { type: 'module' }));
+
+        const hostObj = vm.newObject();
+
+        vm.setProp(hostObj, 'createElement', vm.newFunction('createElement', h => {
+          if (!this.#useGas()) return vm.newNumber(-1);
+          const tag = vm.getString(h).toLowerCase();
+          if (this.#createCount >= QuickJSHighlight.MAX_CREATES || !['pre', 'code', 'span'].includes(tag)) return vm.newNumber(-1);
+          const id = this.#allocId();
+          this.#nodes.set(id, { el: document.createElement(tag), tag });
+          this.#createCount++;
+          return vm.newNumber(id);
+        }));
+
+        vm.setProp(hostObj, 'createTextNode', vm.newFunction('createTextNode', h => {
+          if (!this.#useGas()) return vm.newNumber(-1);
+          if (this.#createCount >= QuickJSHighlight.MAX_CREATES) return vm.newNumber(-1);
+          const id = this.#allocId();
+          this.#nodes.set(id, { el: document.createTextNode(vm.getString(h).slice(0, QuickJSHighlight.MAX_TEXT)), tag: 'text' });
+          this.#createCount++;
+          return vm.newNumber(id);
+        }));
+
+        vm.setProp(hostObj, 'setText', vm.newFunction('setText', (idH, textH) => {
+          if (!this.#useGas()) return;
+          const node = this.#nodes.get(vm.getNumber(idH) >>> 0);
+          if (node && ['text', 'span'].includes(node.tag))
+            node.el.textContent = vm.getString(textH).slice(0, QuickJSHighlight.MAX_TEXT);
+        }));
+
+        vm.setProp(hostObj, 'setClass', vm.newFunction('setClass', (idH, classH) => {
+          if (!this.#useGas()) return;
+          const node = this.#nodes.get(vm.getNumber(idH) >>> 0);
+          const cls = vm.getString(classH);
+          if (node && node.tag === 'span' && QuickJSHighlight.ALLOWED_CLASSES.includes(cls))
+            node.el.className = cls;
+        }));
+
+        vm.setProp(hostObj, 'append', vm.newFunction('append', (parentH, childH) => {
+          if (!this.#useGas()) return;
+          const [parentId, childId] = [vm.getNumber(parentH) >>> 0, vm.getNumber(childH) >>> 0];
+          const [parent, child] = [this.#nodes.get(parentId), this.#nodes.get(childId)];
+          if (!parent || !child || !QuickJSHighlight.SCHEMA[parent.tag]?.includes(child.tag)) return;
+          const count = this.#appendCounts.get(parentId) || 0;
+          if (count >= QuickJSHighlight.MAX_CHILDREN) return;
+          this.#appendCounts.set(parentId, count + 1);
+          parent.el.appendChild(child.el);
+        }));
+
+        const setup = vm.getProp(domMod, 'setup');
+        vm.unwrapResult(vm.callFunction(setup, vm.undefined, hostObj));
+        setup.dispose();
+
+        const userMod = vm.unwrapResult(vm.evalCode(userModule, 'user.js', { type: 'module' }));
+        const callRun = vm.getProp(domMod, 'callRun');
+        const runFn = vm.getProp(userMod, 'run');
+        vm.unwrapResult(vm.callFunction(callRun, vm.undefined, runFn, vm.newNumber(rootId)));
+
+        this.#gas = QuickJSHighlight.GAS_TOPUP;
+        this.#lastRefill = Date.now();
+        [domMod, userMod, callRun, runFn, hostObj].forEach(h => h.dispose());
+        document.getElementById('status').textContent = 'Syntax highlighting complete!';
+      }
+
+      disconnectedCallback() {
+        this.#handles.forEach(h => h.dispose());
+        this.#vm?.dispose();
+        this.#nodes.clear();
+        this.#usedIds.clear();
+        this.#idPool.length = 0;
+        this.#appendCounts.clear();
+      }
+    }
+
+    customElements.define('quickjs-highlight', QuickJSHighlight);
+  </script>
+</body>
+</html>
