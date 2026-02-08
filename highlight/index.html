@@ -15,7 +15,7 @@
     .num { color: #b5cea8; }
     .cmt { color: #6a9955; font-style: italic; }
     .fn { color: #dcdcaa; }
-    .op { color: #d4d4d4; }
+    .op { color: #c586c0; }
     .punc { color: #d4d4d4; }
   </style>
 </head>
@@ -66,7 +66,8 @@
     `;
 
     const userModule = `
-      const KEYWORDS = ['const', 'let', 'var', 'if', 'else', 'return', 'function', 'export', 'import', 'from', 'class', 'extends', 'new', 'this', 'true', 'false', 'null'];
+      const KEYWORDS = ['const', 'let', 'var', 'if', 'else', 'return', 'function', 'export'];
+      const OPERATORS = ['===', '=>', '++', '--'];
 
       function tokenize(code) {
         const tokens = [];
@@ -77,13 +78,6 @@
             let ws = '';
             while (i < code.length && /\\s/.test(code[i])) ws += code[i++];
             tokens.push({ type: 'ws', value: ws });
-            continue;
-          }
-          // Comment
-          if (code[i] === '/' && code[i+1] === '/') {
-            let cmt = '';
-            while (i < code.length && code[i] !== '\\n') cmt += code[i++];
-            tokens.push({ type: 'cmt', value: cmt });
             continue;
           }
           // String
@@ -102,8 +96,18 @@
           // Number
           if (/[0-9]/.test(code[i])) {
             let num = '';
-            while (i < code.length && /[0-9.]/.test(code[i])) num += code[i++];
+            while (i < code.length && /[0-9]/.test(code[i])) num += code[i++];
             tokens.push({ type: 'num', value: num });
+            continue;
+          }
+          // Multi-char operators
+          let foundOp = null;
+          for (const op of OPERATORS) {
+            if (code.slice(i, i + op.length) === op) { foundOp = op; break; }
+          }
+          if (foundOp) {
+            tokens.push({ type: 'op', value: foundOp });
+            i += foundOp.length;
             continue;
           }
           // Identifier or keyword
@@ -124,7 +128,7 @@
             }
             continue;
           }
-          // Operators and punctuation
+          // Single-char punctuation
           tokens.push({ type: 'punc', value: code[i++] });
         }
         return tokens;
@@ -136,7 +140,20 @@
   h.textContent = 'QuickJS Sandbox Demo';
 
   const p1 = document.createElement('p');
-  p1.textContent = 'This page is powered by JavaScript...';
+  p1.textContent = 'This page is powered by JavaScript running inside a QuickJS WebAssembly sandbox.';
+
+  const p2 = document.createElement('p');
+  p2.textContent = 'Only a limited set of DOM operations are allowed — element creation, text updates, and click events.';
+
+  const p3 = document.createElement('p');
+  p3.textContent = 'Use the counter below to see events round-trip through the VM!';
+
+  const p4 = document.createElement('p');
+  const decBtn = document.createElement('button');
+  decBtn.textContent = '-';
+  const countText = document.createTextNode('0');
+  const incBtn = document.createElement('button');
+  incBtn.textContent = '+';
 
   let count = 0;
   const handler = (e) => {
@@ -144,6 +161,9 @@
     else if (e.target === incBtn) count++;
     countText.textContent = String(count);
   };
+  decBtn.addEventListener('click', handler);
+  incBtn.addEventListener('click', handler);
+  p4.append(decBtn, countText, incBtn);
 
   root.append(h, p1, p2, p3, p4);
 }\`;
@@ -174,7 +194,7 @@
     class QuickJSHighlight extends HTMLElement {
       #vm; #handles = []; #nodes = new Map(); #usedIds = new Set(); #idPool = []; #appendCounts = new Map();
       #createCount = 0; #gas = 2000; #lastRefill = 0;
-      static MAX_CREATES = 500; static MAX_TEXT = 1024; static MAX_CHILDREN = 200;
+      static MAX_CREATES = 800; static MAX_TEXT = 1024; static MAX_CHILDREN = 400;
       static SCHEMA = { root: ['pre'], pre: ['code'], code: ['span', 'text'], span: ['text'] };
       static ALLOWED_CLASSES = ['kw', 'str', 'num', 'cmt', 'fn', 'op', 'punc'];
       static GAS_OP = 1; static GAS_TOPUP = 2000; static GAS_REFILL_MS = 1000;
